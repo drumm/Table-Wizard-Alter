@@ -1,0 +1,6 @@
+; $Id: tw_import_delimited.info,v 1.1 2009/03/04 21:43:00 mikeryan Exp $
+name = Table Wizard Alter
+description = Alters tables imported by table wizard
+package = Database
+core = 6.x
+dependencies[] = tw

@@ -1,0 +1,103 @@
+<?php
+
+function tw_alter_menu() {
+  return array(
+    'admin/content/tw/alter/%' => array(
+      'title' => 'Table alter',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('tw_alter_form', 4),
+      'access arguments' => array(TW_ACCESS),
+      'type' => MENU_CALLBACK,
+    ),
+  );
+}
+
+function tw_alter_form_tw_sources_form_alter(&$form, &$form_state) {
+  foreach (array_keys($form['analyze']) as $twtid) {
+    $form['analyze'][$twtid]['#value'] .= ' ' . l(t('alter'), 'admin/content/tw/alter/' . $twtid);
+  }
+}
+
+function tw_alter_form(&$form_state, $twtid) {
+  $table = db_fetch_object(db_query("SELECT twtid, tablename, dbconnection, existing_view_data FROM {tw_tables} WHERE twtid = %d", $twtid));
+  $inspect = schema_invoke('inspect');
+  $form = array(
+    '#table' => $table,
+    'columns' => array(),
+  );
+
+  $result = db_query("SELECT twcid, twtid, colname, weight, primarykey, availablefk, secure, ignorecol, isempty, coltype, minlength, maxlength, minvalue, maxvalue, minstring, maxstring, comments FROM {tw_columns} WHERE twtid = %d ORDER BY twcid", $twtid);
+  while ($column = db_fetch_object($result)) {
+    $schema = tw_alter_optimize($inspect[$table->tablename]['fields'][$column->colname], $table, $column);
+    $form['columns'][$column->twcid] = array(
+      '#prefix' => '<h3>' . check_plain($column->colname) . '</h3>',
+      '#tree' => TRUE,
+      '#column' => $column,
+      '#schema' => $schema,
+      'preview' => array(
+        '#value' => '<pre>' . preg_replace("/^\s*'description' => .*$\n/m", '', schema_phpprint_column($schema, TRUE)) . '</pre>',
+      ),
+    );
+  }
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Do it'), // the imformality demonstrates the complete lack of covering edge cases
+  );
+
+  return $form;
+}
+
+function tw_alter_form_submit($form, &$form_state) {
+  $return = array();
+
+  foreach (element_children($form['columns']) as $twcid) {
+    db_change_field($return, $form['#table']->tablename, $form['columns'][$twcid]['#column']->colname, $form['columns'][$twcid]['#column']->colname, $form['columns'][$twcid]['#schema']);
+  }
+
+  drupal_set_message(t('Done'));
+}
+
+/**
+ * Figure out optimal column types and sizes.
+ */
+function tw_alter_optimize($schema, $table, $column) {
+  // Only alter default fields
+  if ($schema['type'] === 'text' && $schema['size'] === 'big') {
+    // Determine if a column is numeric
+    if (is_numeric($column->minstring) && is_numeric($column->maxstring) && !db_result(db_query_range("SELECT 1 FROM " . tw_quote_identifier('{' . $table->tablename . '}') . " WHERE " . tw_quote_identifier('{' . $column->colname . '}') . " NOT REGEXP '^[0-9]*$'", 0, 1))) {
+      $schema['type'] = 'int';
+      $schema['unsigned'] = $column->minstring >= 0;
+
+      if ($schema['unsigned']) {
+        $max = (int) $column->maxstring;
+      }
+      else {
+        $max = max(-1 * $column->minstring, $column->maxstring);
+      }
+
+      if ($max < 1 << (8 * 1 - !$schema['unsigned'])) {
+        $schema['size'] = 'tiny';
+      }
+      elseif ($max < 1 << (8 * 2 - !$schema['unsigned'])) {
+        $schema['size'] = 'small';
+      }
+      elseif ($max < 1 << (8 * 3 - !$schema['unsigned'])) {
+        $schema['size'] = 'medium';
+      }
+      elseif ($max < 1 << (8 * 4 - !$schema['unsigned'])) {
+        $schema['size'] = 'normal';
+      }
+      elseif ($max < 1 << (8 * 8 - !$schema['unsigned'])) {
+        $schema['size'] = 'big';
+      }
+    }
+    // Otherwise, varchar is probably okay
+    else {
+      $schema['type'] = 'varchar';
+      unset($schema['size']);
+      $schema['length'] = $column->maxlength;
+    }
+  }
+
+  return $schema;
+}
