@@ -13,8 +13,10 @@ function tw_alter_menu() {
 }
 
 function tw_alter_form_tw_sources_form_alter(&$form, &$form_state) {
-  foreach (array_keys($form['analyze']) as $twtid) {
-    $form['analyze'][$twtid]['#value'] .= ' ' . l(t('alter'), 'admin/content/tw/alter/' . $twtid);
+  if (isset($form['analyze'])) {
+    foreach (array_keys($form['analyze']) as $twtid) {
+      $form['analyze'][$twtid]['#value'] .= ' ' . l(t('alter'), 'admin/content/tw/alter/' . $twtid);
+    }
   }
 }
 
